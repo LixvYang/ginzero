@@ -7,17 +7,17 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"os"
+	"runtime/debug"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/pkgerrors"
 )
 
-type Fn func(c *gin.Context) []*zerolog.Event
-
-// ZapLogger is the minimal logger interface compatible with zap.Logger
+// ZapLogger is the minimal logger interface compatible with zerolog.Logger
 type ZeroLogger interface {
 	Info() *zerolog.Event
 	Error() *zerolog.Event
@@ -27,7 +27,41 @@ type Config struct {
 	TimeFormat string
 	UTC        bool
 	SkipPaths  []string
-	Events     Fn
+}
+
+type OptionFunc func(*Config)
+
+func WithTimeFormat(timeFormat string) OptionFunc {
+	return func(c *Config) {
+		c.TimeFormat = timeFormat
+	}
+}
+
+func WithUTC(utc bool) OptionFunc {
+	return func(c *Config) {
+		c.UTC = utc
+	}
+}
+
+func WithSkipPaths(paths []string) OptionFunc {
+	return func(c *Config) {
+		if len(paths) != 0 {
+			c.SkipPaths = append(c.SkipPaths, paths...)
+		}
+	}
+}
+
+func Ginzero(logger ZeroLogger, optFuncs ...OptionFunc) gin.HandlerFunc {
+	config := &Config{
+		TimeFormat: time.RFC3339,
+		UTC:        true,
+	}
+
+	for _, of := range optFuncs {
+		of(config)
+	}
+
+	return GinzeroWithConfig(logger, config)
 }
 
 func GinzeroWithConfig(logger ZeroLogger, conf *Config) gin.HandlerFunc {
@@ -41,45 +75,48 @@ func GinzeroWithConfig(logger ZeroLogger, conf *Config) gin.HandlerFunc {
 		// some evil middlewares modify this values
 		path := c.Request.URL.Path
 		query := c.Request.URL.RawQuery
-		c.Next()
 
-		if _, ok := skipPaths[path]; !ok {
-			end := time.Now()
-			latency := end.Sub(start)
-			if conf.UTC {
-				end = end.UTC()
-			}
-
-			// l := zerolog.New(io.Discard).With().Logger()
-			// l.Info()
-			fields := []*zerolog.Event{
-				zerolog.Dict().Int("status", c.Writer.Status()),
-				zerolog.Dict().Str("method", c.Request.Method),
-				zerolog.Dict().Str("path", path),
-				zerolog.Dict().Str("query", query),
-				zerolog.Dict().Str("ip", c.ClientIP()),
-				zerolog.Dict().Str("user-agent", c.Request.UserAgent()),
-				zerolog.Dict().Dur("latency", latency),
-			}
-
-			if conf.TimeFormat != "" {
-				// fields = append(fields, zap.String("time", end.Format(conf.TimeFormat)))
-				fields = append(fields, zerolog.Dict().Str("time", end.Format(conf.TimeFormat)))
-			}
-
-			if conf.Events != nil {
-				fields = append(fields, conf.Events(c)...)
-			}
-
-			if len(c.Errors) > 0 {
-				// Append error field if this is an erroneous request.
-				for _, e := range c.Errors.Errors() {
-					logger.Error().Str("error", e).Fields(fields).Send()
+		defer func() {
+			if _, ok := skipPaths[path]; !ok {
+				end := time.Now()
+				latency := end.Sub(start)
+				if conf.UTC {
+					end = end.UTC()
 				}
-			} else {
-				logger.Info().Str("path", path).Fields(fields).Send()
+				l := logger.Info().
+					Int("status", c.Writer.Status()).
+					Str("method", c.Request.Method).
+					Str("path", path).
+					Str("query", query).
+					Str("ip", c.ClientIP()).
+					Str("user-agent", c.Request.UserAgent()).
+					Dur("latency", latency)
+
+				if conf.TimeFormat != "" {
+					l.Str("time", end.Format(conf.TimeFormat))
+				}
+
+				if len(c.Errors) > 0 {
+					l = logger.Error().
+						Int("status", c.Writer.Status()).
+						Str("method", c.Request.Method).
+						Str("path", path).
+						Str("query", query).
+						Str("ip", c.ClientIP()).
+						Str("user-agent", c.Request.UserAgent()).
+						Dur("latency", latency)
+
+					// Append error field if this is an erroneous request.
+					for _, e := range c.Errors.Errors() {
+						l.Str("error", e).Send()
+					}
+				} else {
+					l.Send()
+				}
 			}
-		}
+		}()
+
+		c.Next()
 	}
 }
 
@@ -113,6 +150,7 @@ func CustomRecoveryWithZero(logger ZeroLogger, stack bool, recovery gin.Recovery
 						Any("error", err).
 						Str("request", string(httpRequest)).
 						Send()
+
 					// If the connection is dead, we can't write a status to it.
 					c.Error(err.(error)) // nolint: errcheck
 					c.Abort()
@@ -120,11 +158,11 @@ func CustomRecoveryWithZero(logger ZeroLogger, stack bool, recovery gin.Recovery
 				}
 
 				if stack {
+					errors.New(string(debug.Stack()))
 					logger.Error().
 						Stack().
+						Err(errors.New(string(debug.Stack()))).
 						Str("error", "[Recovery from panic]").
-						Time("time", time.Now()).
-						Any("error", err).
 						Str("request", string(httpRequest)).
 						Send()
 
