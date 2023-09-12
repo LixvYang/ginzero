@@ -20,7 +20,7 @@ func NewLogger() zerolog.Logger {
 func main() {
 	logger := NewLogger()
 	r := gin.New()
-	r.Use(ginzero.Ginzero(&logger), ginzero.RecoveryWithZero(&logger, true))
+	r.Use(ginzero.Ginzero(&logger, ginzero.WithSkipPaths([]string{"/hello"})), ginzero.RecoveryWithZero(&logger, true))
 
 	r.GET("/hello", func(c *gin.Context) {
 		c.String(200, "hello")
