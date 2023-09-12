@@ -31,9 +31,7 @@ type OptionFunc func(*Config)
 
 func WithSkipPaths(paths []string) OptionFunc {
 	return func(c *Config) {
-		if len(paths) != 0 {
-			c.SkipPaths = append(c.SkipPaths, paths...)
-		}
+		c.SkipPaths = append(c.SkipPaths, paths...)
 	}
 }
 
