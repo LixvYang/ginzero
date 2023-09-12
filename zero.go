@@ -24,24 +24,10 @@ type ZeroLogger interface {
 }
 
 type Config struct {
-	TimeFormat string
-	UTC        bool
-	SkipPaths  []string
+	SkipPaths []string
 }
 
 type OptionFunc func(*Config)
-
-func WithTimeFormat(timeFormat string) OptionFunc {
-	return func(c *Config) {
-		c.TimeFormat = timeFormat
-	}
-}
-
-func WithUTC(utc bool) OptionFunc {
-	return func(c *Config) {
-		c.UTC = utc
-	}
-}
 
 func WithSkipPaths(paths []string) OptionFunc {
 	return func(c *Config) {
@@ -52,10 +38,7 @@ func WithSkipPaths(paths []string) OptionFunc {
 }
 
 func Ginzero(logger ZeroLogger, optFuncs ...OptionFunc) gin.HandlerFunc {
-	config := &Config{
-		TimeFormat: time.RFC3339,
-		UTC:        true,
-	}
+	config := &Config{}
 
 	for _, of := range optFuncs {
 		of(config)
@@ -80,13 +63,9 @@ func GinzeroWithConfig(logger ZeroLogger, conf *Config) gin.HandlerFunc {
 			if _, ok := skipPaths[path]; !ok {
 				end := time.Now()
 				latency := end.Sub(start)
-				if conf.UTC {
-					end = end.UTC()
-				}
 
 				if len(c.Errors) > 0 {
 					l := logger.Error().
-						Str("time", end.Format(conf.TimeFormat)).
 						Int("status", c.Writer.Status()).
 						Str("method", c.Request.Method).
 						Str("path", path).
@@ -95,15 +74,13 @@ func GinzeroWithConfig(logger ZeroLogger, conf *Config) gin.HandlerFunc {
 						Str("user-agent", c.Request.UserAgent()).
 						Dur("latency", latency)
 
-					if conf.TimeFormat != "" {
-						l.Str("time", end.Format(conf.TimeFormat))
-					}
 					// Append error field if this is an erroneous request.
 					for _, e := range c.Errors.Errors() {
 						l.Str("error", e).Send()
 					}
 				} else {
-					l := logger.Info().
+					l := logger.
+						Info().
 						Int("status", c.Writer.Status()).
 						Str("method", c.Request.Method).
 						Str("path", path).
@@ -111,10 +88,6 @@ func GinzeroWithConfig(logger ZeroLogger, conf *Config) gin.HandlerFunc {
 						Str("ip", c.ClientIP()).
 						Str("user-agent", c.Request.UserAgent()).
 						Dur("latency", latency)
-
-					if conf.TimeFormat != "" {
-						l.Str("time", end.Format(conf.TimeFormat))
-					}
 					l.Send()
 				}
 			}
@@ -149,7 +122,8 @@ func CustomRecoveryWithZero(logger ZeroLogger, stack bool, recovery gin.Recovery
 
 				httpRequest, _ := httputil.DumpRequest(c.Request, false)
 				if brokenPipe {
-					logger.Error().
+					logger.
+						Error().
 						Str("path", c.Request.URL.Path).
 						Any("error", err).
 						Str("request", string(httpRequest)).
@@ -163,7 +137,8 @@ func CustomRecoveryWithZero(logger ZeroLogger, stack bool, recovery gin.Recovery
 
 				if stack {
 					errors.New(string(debug.Stack()))
-					logger.Error().
+					logger.
+						Error().
 						Stack().
 						Err(errors.New(string(debug.Stack()))).
 						Str("error", "[Recovery from panic]").
@@ -171,9 +146,9 @@ func CustomRecoveryWithZero(logger ZeroLogger, stack bool, recovery gin.Recovery
 						Send()
 
 				} else {
-					logger.Error().
+					logger.
+						Error().
 						Str("error", "[Recovery from panic]").
-						Time("time", time.Now()).
 						Any("error", err).
 						Str("request", string(httpRequest)).
 						Send()
