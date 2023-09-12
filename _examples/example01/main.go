@@ -19,13 +19,17 @@ func NewReqId() string {
 	return base64.URLEncoding.EncodeToString(b[:])
 }
 
-func main() {
-
-	logger := zerolog.New(zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: time.RFC3339}).
+func NewLogger() zerolog.Logger {
+	logger := zerolog.New(os.Stdout).
 		With().
+		Caller().
 		Timestamp().
 		Logger()
+	return logger
+}
 
+func main() {
+	logger := NewLogger()
 	r := gin.New()
 	r.Use(ginzero.Ginzero(&logger), ginzero.RecoveryWithZero(&logger, true))
 

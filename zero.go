@@ -83,21 +83,10 @@ func GinzeroWithConfig(logger ZeroLogger, conf *Config) gin.HandlerFunc {
 				if conf.UTC {
 					end = end.UTC()
 				}
-				l := logger.Info().
-					Int("status", c.Writer.Status()).
-					Str("method", c.Request.Method).
-					Str("path", path).
-					Str("query", query).
-					Str("ip", c.ClientIP()).
-					Str("user-agent", c.Request.UserAgent()).
-					Dur("latency", latency)
-
-				if conf.TimeFormat != "" {
-					l.Str("time", end.Format(conf.TimeFormat))
-				}
 
 				if len(c.Errors) > 0 {
-					l = logger.Error().
+					l := logger.Error().
+						Str("time", end.Format(conf.TimeFormat)).
 						Int("status", c.Writer.Status()).
 						Str("method", c.Request.Method).
 						Str("path", path).
@@ -106,11 +95,26 @@ func GinzeroWithConfig(logger ZeroLogger, conf *Config) gin.HandlerFunc {
 						Str("user-agent", c.Request.UserAgent()).
 						Dur("latency", latency)
 
+					if conf.TimeFormat != "" {
+						l.Str("time", end.Format(conf.TimeFormat))
+					}
 					// Append error field if this is an erroneous request.
 					for _, e := range c.Errors.Errors() {
 						l.Str("error", e).Send()
 					}
 				} else {
+					l := logger.Info().
+						Int("status", c.Writer.Status()).
+						Str("method", c.Request.Method).
+						Str("path", path).
+						Str("query", query).
+						Str("ip", c.ClientIP()).
+						Str("user-agent", c.Request.UserAgent()).
+						Dur("latency", latency)
+
+					if conf.TimeFormat != "" {
+						l.Str("time", end.Format(conf.TimeFormat))
+					}
 					l.Send()
 				}
 			}
