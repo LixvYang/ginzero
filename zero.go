@@ -25,13 +25,22 @@ type ZeroLogger interface {
 
 type Config struct {
 	SkipPaths []string
+	Genxid    func() string
 }
 
 type OptionFunc func(*Config)
 
-func WithSkipPaths(paths []string) OptionFunc {
+func SkipPaths(paths []string) OptionFunc {
 	return func(c *Config) {
 		c.SkipPaths = append(c.SkipPaths, paths...)
+	}
+}
+
+func Genxid(genxid func() string) OptionFunc {
+	return func(c *Config) {
+		if genxid != nil {
+			c.Genxid = genxid
+		}
 	}
 }
 
@@ -72,6 +81,10 @@ func GinzeroWithConfig(logger ZeroLogger, conf *Config) gin.HandlerFunc {
 						Str("user-agent", c.Request.UserAgent()).
 						Dur("latency", latency)
 
+					if conf.Genxid != nil {
+						l.Str("xid", conf.Genxid())
+					}
+
 					// Append error field if this is an erroneous request.
 					for _, e := range c.Errors.Errors() {
 						l.Str("error", e).Send()
@@ -86,6 +99,11 @@ func GinzeroWithConfig(logger ZeroLogger, conf *Config) gin.HandlerFunc {
 						Str("ip", c.ClientIP()).
 						Str("user-agent", c.Request.UserAgent()).
 						Dur("latency", latency)
+
+					if conf.Genxid != nil {
+						l.Str("xid", conf.Genxid())
+					}
+
 					l.Send()
 				}
 			}
@@ -95,7 +113,7 @@ func GinzeroWithConfig(logger ZeroLogger, conf *Config) gin.HandlerFunc {
 	}
 }
 
-func defaultHandleRecovery(c *gin.Context, err interface{}) {
+func defaultHandleRecovery(c *gin.Context, _ any) {
 	c.AbortWithStatus(http.StatusInternalServerError)
 }
 func RecoveryWithZero(logger ZeroLogger, stack bool) gin.HandlerFunc {
