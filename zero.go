@@ -17,6 +17,8 @@ import (
 	"github.com/rs/zerolog/pkgerrors"
 )
 
+var Xid = "Xid"
+
 // ZapLogger is the minimal logger interface compatible with zerolog.Logger
 type ZeroLogger interface {
 	Info() *zerolog.Event
@@ -82,7 +84,7 @@ func GinzeroWithConfig(logger ZeroLogger, conf *Config) gin.HandlerFunc {
 						Dur("latency", latency)
 
 					if conf.Genxid != nil {
-						l.Str("xid", conf.Genxid())
+						l.Str(Xid, conf.Genxid())
 					}
 
 					// Append error field if this is an erroneous request.
