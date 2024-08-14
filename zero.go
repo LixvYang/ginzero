@@ -3,17 +3,21 @@
 package ginzero
 
 import (
+	"bytes"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httputil"
 	"os"
 	"runtime/debug"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 	"github.com/rs/zerolog/pkgerrors"
 )
 
@@ -56,17 +60,39 @@ func Ginzero(logger ZeroLogger, optFuncs ...OptionFunc) gin.HandlerFunc {
 	return GinzeroWithConfig(logger, config)
 }
 
+var bufferPool = sync.Pool{
+	New: func() interface{} {
+		return new(bytes.Buffer)
+	},
+}
+
 func GinzeroWithConfig(logger ZeroLogger, conf *Config) gin.HandlerFunc {
-	skipPaths := make(map[string]bool, len(conf.SkipPaths))
-	for _, path := range conf.SkipPaths {
-		skipPaths[path] = true
-	}
 
 	return func(c *gin.Context) {
 		start := time.Now()
 		// some evil middlewares modify this values
 		path := c.Request.URL.Path
 		query := c.Request.URL.RawQuery
+
+		skipPaths := make(map[string]bool, len(conf.SkipPaths))
+		for _, path := range conf.SkipPaths {
+			skipPaths[path] = true
+		}
+
+		bodyBuf := bufferPool.Get().(*bytes.Buffer)
+		defer func() {
+			bodyBuf.Reset()
+			bufferPool.Put(bodyBuf)
+		}()
+
+		_, err := io.Copy(bodyBuf, c.Request.Body)
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to read request body")
+			c.Error(err)
+			return
+		}
+
+		c.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBuf.Bytes()))
 
 		defer func() {
 			if _, ok := skipPaths[path]; !ok {
@@ -79,6 +105,7 @@ func GinzeroWithConfig(logger ZeroLogger, conf *Config) gin.HandlerFunc {
 						Str("method", c.Request.Method).
 						Str("path", path).
 						Str("query", query).
+						RawJSON("request_body", bodyBuf.Bytes()).
 						Str("ip", c.ClientIP()).
 						Str("user-agent", c.Request.UserAgent()).
 						Dur("latency", latency)
@@ -98,6 +125,7 @@ func GinzeroWithConfig(logger ZeroLogger, conf *Config) gin.HandlerFunc {
 						Str("method", c.Request.Method).
 						Str("path", path).
 						Str("query", query).
+						RawJSON("request_body", bodyBuf.Bytes()).
 						Str("ip", c.ClientIP()).
 						Str("user-agent", c.Request.UserAgent()).
 						Dur("latency", latency)
